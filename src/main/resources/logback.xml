@@ -18,6 +18,9 @@
     <logger name="org.hibernate" level="WARN"/>
     <logger name="org.hibernate.SQL" level="DEBUG"/>
 
+    <logger name="org.testcontainers" level="DEBUG"/>
+    <logger name="com.github.dockerjava" level="DEBUG"/>
+
     <root level="INFO">
         <appender-ref ref="FILE"/>
     </root>
