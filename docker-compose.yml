@@ -1,5 +1,5 @@
 services:
-  postgres:
+  user-postgres:
     image: postgres:17
     container_name: user-service-postgres
     environment:
@@ -9,22 +9,24 @@ services:
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - user_postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U user_service_user -d user_service"]
+      test: [ "CMD-SHELL", "pg_isready -U user_service_user -d user_service" ]
       interval: 5s
       timeout: 5s
       retries: 10
       start_period: 5s
 
   user-service:
-    build: .
+    build:
+      context: ./user-service
+      dockerfile: Dockerfile
     container_name: user-service-app
     depends_on:
-      postgres:
+      user-postgres:
         condition: service_healthy
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/user_service
+      SPRING_DATASOURCE_URL: jdbc:postgresql://user-postgres:5432/user_service
       SPRING_DATASOURCE_USERNAME: user_service_user
       SPRING_DATASOURCE_PASSWORD: admin123
     ports:
@@ -32,5 +34,24 @@ services:
     volumes:
       - ./logs:/app/logs
 
+  notification-postgres:
+    image: postgres:17
+    container_name: notification-service-postgres
+    environment:
+      POSTGRES_DB: notification_service
+      POSTGRES_USER: notification_service_user
+      POSTGRES_PASSWORD: admin123
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - notification_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U notification_service_user -d notification_service" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
 volumes:
-  postgres_data:
+  user_postgres_data:
+  notification_postgres_data:
