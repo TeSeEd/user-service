@@ -99,6 +99,12 @@
             <artifactId>spring-boot-testcontainers</artifactId>
             <scope>test</scope>
         </dependency>
+
+        <dependency>
+            <groupId>com.aston</groupId>
+            <artifactId>event-contracts</artifactId>
+            <version>1.0.0</version>
+        </dependency>
     </dependencies>
 
     <build>
