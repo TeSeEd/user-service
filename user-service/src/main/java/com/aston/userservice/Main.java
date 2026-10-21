@@ -1,15 +1,11 @@
 package com.aston.userservice;
 
-import com.aston.userservice.entity.User;
-import com.aston.userservice.service.UserService;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-
-import java.util.List;
-import java.util.NoSuchElementException;
-import java.util.Scanner;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 @SpringBootApplication
+@EnableScheduling
 public class Main {
 
     public static void main(String[] args) {

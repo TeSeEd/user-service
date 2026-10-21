@@ -1,384 +1,317 @@
-# User Service
+# Aston Microservices
 
-REST API для управления пользователями, разработанный на **Java 21 и Spring Boot 3.5.6**.
+Учебный проект на **Java 21 и Spring Boot 3.5.6**.
 
-Приложение реализует CRUD-операции через HTTP, использует Spring Data JPA и Hibernate ORM для работы с PostgreSQL 17.
+Приложение состоит из двух микросервисов: один отвечает за управление пользователями, второй — за отправку уведомлений по электронной почте.
 
-Проект поддерживает локальный запуск и запуск через Docker Compose. При запуске через Docker автоматически поднимаются два контейнера: Spring Boot-приложение и PostgreSQL.
+Для обмена событиями между сервисами используется Apache Kafka. Данные хранятся в PostgreSQL.
 
 ## Возможности
 
-- Создание пользователей.
-- Поиск пользователя по ID.
-- Получение списка всех пользователей.
-- Обновление информации о пользователе.
-- Удаление пользователей.
-- Валидация входных данных.
-- Централизованная обработка ошибок.
-- Управление транзакциями.
-- Автоматическое создание и обновление таблиц Hibernate.
-- Модульное и интеграционное тестирование.
+- Создание, получение, обновление и удаление пользователей через REST API.
+- Проверка входных данных и обработка ошибок.
+- Отправка событий в Kafka при создании и удалении пользователя.
+- Сохранение событий через Transactional Outbox.
+- Повторная отправка событий при ошибках.
+- Получение событий в notification-service.
+- Защита от повторной обработки одинаковых событий.
+- Отправка писем через SMTP.
+- Повторные попытки отправки уведомлений.
+- REST API для отправки произвольного письма.
+- Запуск проекта через Docker Compose.
 
-## Используемые технологии
+## Технологии
 
-- Java 21.
-- Spring Boot 3.5.6.
-- Spring Web MVC.
-- Spring Data JPA.
-- Hibernate ORM.
-- Jakarta Bean Validation.
-- PostgreSQL 17.
-- Maven.
-- JUnit 5.
-- Mockito.
-- MockMvc.
-- Testcontainers 2.0.5.
-- Docker и Docker Compose.
+- Java 21
+- Spring Boot 3.5.6
+- Spring Web
+- Spring Data JPA, Hibernate
+- PostgreSQL 17
+- Apache Kafka
+- Spring Kafka
+- Spring Mail
+- Flyway
+- Maven
+- JUnit 5, Mockito, MockMvc
+- Testcontainers 2.0.5
+- Docker Compose
+- Mailpit
 
-## Архитектура приложения
+## Структура проекта
 
-Проект разделён на следующие слои:
+Проект разделён на три Maven-модуля:
 
-| Слой | Назначение |
-|---|---|
-| Controller | Обработка HTTP-запросов и формирование ответов |
-| Service | Бизнес-логика, проверки и управление транзакциями |
-| Repository | Работа с базой данных через Spring Data JPA |
-| Entity | JPA-сущность пользователя |
-| DTO | Передача данных между клиентом и REST API |
-| Mapper | Преобразование сущностей в DTO |
-| Exception Handler | Централизованная обработка исключений |
-
-В качестве JPA-провайдера используется Hibernate ORM.
-
-### Сущность User
-
-| Поле | Тип | Назначение |
-|---|---|---|
-| id | Long | Уникальный идентификатор пользователя |
-| name | String | Имя |
-| email | String | Электронная почта |
-| age | Integer | Возраст |
-| createdAt | LocalDateTime | Дата и время создания |
-
-Поле `id` генерируется автоматически. Поле `createdAt` заполняется при создании пользователя.
-
-## Требования для запуска
-
-Для запуска приложения через Docker необходимы:
-
-- Docker Desktop или Docker Engine.
-- Docker Compose.
-
-Отдельная установка Java, Maven и PostgreSQL не требуется.
-
-## Запуск через Docker Compose
-
-Откройте терминал в корневом каталоге проекта.
-
-### Сборка и запуск
-
-```shell
-docker compose up --build -d
+```text
+aston-microservices/
+├── event-contracts/
+├── user-service/
+├── notification-service/
+├── docker-compose.yml
+└── pom.xml
 ```
 
-Docker Compose соберёт Spring Boot-приложение и запустит два контейнера:
+**event-contracts** — общие классы событий, которые используются обоими микросервисами.
 
-| Контейнер | Назначение |
-|---|---|
-| user-service-postgres | PostgreSQL 17 |
-| user-service-app | Spring Boot REST API |
+**user-service** — REST API для работы с пользователями. При создании и удалении пользователя сохраняет событие в Outbox, после чего отправляет его в Kafka.
 
-Приложение запускается после прохождения проверки готовности PostgreSQL.
+**notification-service** — получает события Kafka, сохраняет уведомления в PostgreSQL и отправляет письма.
 
-### Проверка состояния
+### Как работают уведомления
 
-```shell
+```text
+REST API
+   |
+   v
+user-service
+   |
+   v
+PostgreSQL (Outbox)
+   |
+   v
+Apache Kafka
+   |
+   v
+notification-service
+   |
+   v
+PostgreSQL (Notifications)
+   |
+   v
+SMTP
+```
+
+При создании пользователя отправляется событие `USER_CREATED`, а при удалении — `USER_DELETED`.
+
+Для повышения надёжности события сначала записываются в базу данных. Если Kafka временно недоступна, отправка повторяется.
+
+Notification-service также сохраняет уведомления в БД и повторяет отправку письма в случае ошибки.
+
+## Запуск через Docker
+
+Для запуска необходимы Docker Desktop и Docker Compose.
+
+Из корневой папки проекта выполнить:
+
+```bash
+docker compose up -d --build
+```
+
+Docker Compose запускает шесть сервисов:
+
+| Сервис | Назначение | Порт |
+|---|---|---|
+| user-service | REST API пользователей | 8080 |
+| notification-service | REST API уведомлений | 8081 |
+| user-postgres | База пользователей | 5432 |
+| notification-postgres | База уведомлений | 5433 |
+| kafka | Брокер сообщений | 9092 |
+| mailpit | Тестовый SMTP-сервер | 1025, 8025 |
+
+Проверка контейнеров:
+
+```bash
 docker compose ps
 ```
 
-### Просмотр логов Spring Boot
+Просмотр логов:
 
-```shell
+```bash
 docker compose logs -f user-service
+docker compose logs -f notification-service
 ```
 
-### Проверка REST API
+После запуска приложения доступны по адресам:
 
-После запуска приложение доступно по адресу:
+- User API: http://localhost:8080/api/users
+- Notification API: http://localhost:8081/api/notifications/email
+- Mailpit: http://localhost:8025
 
-```text
-http://localhost:8080/api/users
-```
+Mailpit используется для тестирования писем. Он принимает сообщения, но не отправляет их на реальные почтовые адреса.
 
-Проверить работу можно через браузер или терминал:
+## REST API пользователей
 
-```shell
-curl http://localhost:8080/api/users
-```
+Базовый адрес: `http://localhost:8080/api/users`
 
-Если в базе данных ещё нет пользователей, ответом будет:
+| Метод | Адрес | Описание |
+|---|---|---|
+| POST | /api/users | Создание пользователя |
+| GET | /api/users | Список пользователей |
+| GET | /api/users/{id} | Поиск по ID |
+| PUT | /api/users/{id} | Обновление пользователя |
+| DELETE | /api/users/{id} | Удаление пользователя |
 
-```json
-[]
-```
-
-В Windows PowerShell для HTTP-запросов можно использовать `curl.exe` или `Invoke-RestMethod`.
-
-## REST API
-
-Базовый URL:
-
-```text
-http://localhost:8080/api/users
-```
-
-| Метод | Endpoint | Описание | HTTP-статус |
-|---|---|---|---|
-| POST | /api/users | Создать пользователя | 201 Created |
-| GET | /api/users | Получить список пользователей | 200 OK |
-| GET | /api/users/{id} | Получить пользователя по ID | 200 OK |
-| PUT | /api/users/{id} | Обновить пользователя | 200 OK |
-| DELETE | /api/users/{id} | Удалить пользователя | 204 No Content |
-
-### Создание пользователя
-
-**POST** `/api/users`
-
-Тело запроса:
+### Пример создания пользователя
 
 ```json
 {
-  "name": "Иван",
+  "name": "Ivan",
   "email": "ivan@example.com",
   "age": 25
 }
 ```
 
-При успешном создании возвращается HTTP 201, данные пользователя и заголовок `Location`.
-
-### Получение пользователя
-
-**GET** `/api/users/1`
-
-Возвращает данные пользователя с ID 1.
-
-Если пользователь не найден, возвращается HTTP 404.
-
-### Получение списка пользователей
-
-**GET** `/api/users`
-
-Возвращает массив пользователей. Если пользователей нет, возвращается пустой массив.
-
-### Обновление пользователя
-
-**PUT** `/api/users/1`
-
-Тело запроса:
-
-```json
-{
-  "name": "Дмитрий",
-  "email": "dmitry@example.com",
-  "age": 30
-}
-```
-
-При успешном обновлении возвращается HTTP 200 и обновлённый пользователь.
-
-### Удаление пользователя
-
-**DELETE** `/api/users/1`
-
-При успешном удалении возвращается HTTP 204 без тела ответа.
-
-## Работа с API через PowerShell
-
-### Создание пользователя
+Пример запроса из PowerShell:
 
 ```powershell
 $body = @{
-    name = "Иван"
+    name = "Ivan"
     email = "ivan@example.com"
     age = 25
 } | ConvertTo-Json
 
-Invoke-RestMethod -Uri "http://localhost:8080/api/users" -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($body))
+Invoke-RestMethod `
+    -Uri "http://localhost:8080/api/users" `
+    -Method Post `
+    -ContentType "application/json" `
+    -Body $body
 ```
 
-### Получение всех пользователей
+После создания пользователя формируется событие `USER_CREATED`. Оно передаётся через Kafka в notification-service, который создаёт и отправляет уведомление.
 
-```powershell
-Invoke-RestMethod -Uri "http://localhost:8080/api/users" -Method Get
+При удалении пользователя аналогичным образом формируется событие `USER_DELETED`.
+
+## REST API уведомлений
+
+Notification-service также позволяет отправить письмо напрямую, без Kafka.
+
+**POST** `/api/notifications/email`
+
+Пример JSON:
+
+```json
+{
+  "to": "test@example.com",
+  "subject": "Тестовое письмо",
+  "body": "Привет! Это проверка отправки письма."
+}
 ```
 
-### Поиск пользователя
-
-```powershell
-Invoke-RestMethod -Uri "http://localhost:8080/api/users/1" -Method Get
-```
-
-### Обновление пользователя
+Пример запроса в PowerShell:
 
 ```powershell
 $body = @{
-    name = "Дмитрий"
-    email = "dmitry@example.com"
-    age = 30
+    to = "test@example.com"
+    subject = "Test email"
+    body = "Hello from notification-service"
 } | ConvertTo-Json
 
-Invoke-RestMethod -Uri "http://localhost:8080/api/users/1" -Method Put -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($body))
+Invoke-RestMethod `
+    -Uri "http://localhost:8081/api/notifications/email" `
+    -Method Post `
+    -ContentType "application/json" `
+    -Body $body
 ```
 
-### Удаление пользователя
+При успешной отправке возвращается HTTP `202 Accepted`.
 
-```powershell
-Invoke-RestMethod -Uri "http://localhost:8080/api/users/1" -Method Delete
-```
+Отправленное письмо можно посмотреть в интерфейсе Mailpit:
 
-Вместо `1` необходимо указывать существующий идентификатор пользователя.
+http://localhost:8025
 
-## Валидация данных
+## Базы данных
 
-Для проверки входных данных используется Jakarta Bean Validation.
+Для каждого микросервиса используется отдельная база PostgreSQL.
 
-- `name` — не должен быть пустым.
-- `email` — должен быть непустым адресом корректного формата.
-- `age` — должен быть положительным числом.
+**user-service:**
+- `users` — пользователи.
+- `outbox_events` — события для отправки в Kafka.
 
-Некорректные данные приводят к ответу `400 Bad Request`.
+**notification-service:**
+- `notifications` — уведомления и их статусы.
+- `processed_user_events` — идентификаторы обработанных событий для защиты от дубликатов.
 
-Для обработки исключений используется `GlobalExceptionHandler`.
-
-Основные статусы ошибок:
-
-| Статус | Причина |
-|---|---|
-| 400 Bad Request | Некорректные входные данные или ID |
-| 404 Not Found | Пользователь не найден |
-
-Ответы об ошибках формируются в виде JSON со статусом, сообщением и временем возникновения.
-
-## База данных
-
-Для хранения пользователей используется PostgreSQL 17.
-
-При запуске через Docker Compose приложение подключается к БД по внутреннему адресу:
-
-```text
-jdbc:postgresql://postgres:5432/user_service
-```
-
-`postgres` — сетевое имя сервиса базы данных внутри Docker Compose.
-
-При локальном запуске используется адрес:
-
-```text
-jdbc:postgresql://localhost:5432/user_service
-```
-
-Параметры подключения Spring Boot могут переопределяться переменными окружения.
-
-Схемой базы данных управляет Hibernate с настройкой:
+Для управления структурой таблиц используется Flyway.
 
 ```properties
-spring.jpa.hibernate.ddl-auto=update
+spring.jpa.hibernate.ddl-auto=validate
+spring.flyway.enabled=true
 ```
 
-Данные сохраняются в Docker volume `postgres_data` и не удаляются при обычной остановке контейнеров.
+Миграции применяются автоматически при запуске приложений.
 
-### Подключение к PostgreSQL через терминал
+### Проверка базы через Docker
 
-```shell
-docker compose exec postgres psql -U user_service_user -d user_service
+```bash
+docker compose exec user-postgres psql -U user_service_user -d user_service
 ```
 
-Пример SQL-запроса:
+```bash
+docker compose exec notification-postgres psql -U notification_service_user -d notification_service
+```
+
+Примеры SQL-запросов:
 
 ```sql
 SELECT * FROM users;
-```
 
-Для выхода из PostgreSQL:
+SELECT * FROM outbox_events;
 
-```text
-\q
+SELECT * FROM notifications;
 ```
 
 ## Тестирование
 
-В проекте реализованы модульные, MVC и интеграционные тесты.
+В проекте используются JUnit 5, Mockito, MockMvc и Testcontainers.
 
-| Тестовый класс | Назначение | Количество |
-|---|---|---|
-| UserServiceTest | Бизнес-логика с Mockito | 36 |
-| UserControllerTest | REST API с MockMvc | 11 |
-| UserRepositoryIntegrationTest | PostgreSQL через Testcontainers | 7 |
+Проверяются бизнес-логика, REST API, работа с PostgreSQL, публикация событий Kafka и другие компоненты.
 
-**Всего: 54 теста.**
+Для запуска всех тестов из корня проекта:
 
-Последняя проверка Maven завершилась успешно:
-
-```text
-Tests run: 54, Failures: 0, Errors: 0, Skipped: 0
-BUILD SUCCESS
-```
-
-### Запуск тестов
-
-Для запуска тестов локально необходимы Java, Maven и работающий Docker Engine.
-
-```shell
+```bash
 mvn clean test
 ```
 
-Testcontainers создаёт отдельный временный контейнер PostgreSQL для интеграционных тестов.
+Для интеграционных тестов должен быть запущен Docker.
 
-Данные основной базы приложения при этом не изменяются.
+На последней проверке успешно прошли **97 тестов**:
 
-## Логи
+| Модуль | Количество |
+|---|---:|
+| event-contracts | 5 |
+| user-service | 86 |
+| notification-service | 6 |
+| **Всего** | **97** |
 
-Просмотр логов приложения:
+Результат сборки: `BUILD SUCCESS`.
 
-```shell
-docker compose logs -f user-service
-```
+Также вручную проверена работа двух микросервисов через Kafka, создание и удаление пользователей, сохранение уведомлений и отправка писем через Mailpit.
 
-Просмотр логов PostgreSQL:
+## Остановка проекта
 
-```shell
-docker compose logs -f postgres
-```
+Остановка контейнеров:
 
-Вывод SQL-запросов Hibernate в стандартную консоль приложения отключён.
-
-## Остановка приложения
-
-Остановить и удалить контейнеры приложения:
-
-```shell
+```bash
 docker compose down
 ```
 
-Данные PostgreSQL сохраняются.
+Данные PostgreSQL при этом сохраняются в Docker volumes.
 
-Остановить контейнеры и удалить данные базы:
+Если нужно удалить также данные баз:
 
-```shell
+```bash
 docker compose down -v
 ```
 
-**Внимание:** команда с `-v` удаляет Docker volume с данными PostgreSQL.
+**Внимание:** команда с `-v` удаляет сохранённые данные PostgreSQL и Kafka.
 
 ## Локальный запуск
 
-При наличии Java 21, Maven и доступного PostgreSQL приложение можно запустить непосредственно на компьютере:
+Для запуска без Docker-контейнеров приложений необходимы Java 21, Maven, а также доступные PostgreSQL и Kafka.
 
-```shell
-mvn spring-boot:run
+Микросервисы можно запускать отдельно через IntelliJ IDEA или Maven.
+
+Для user-service:
+
+```bash
+mvn -pl user-service -am spring-boot:run
 ```
 
-По умолчанию REST API использует порт 8080.
+Для notification-service:
 
-Локальный запуск полезен для разработки и отладки приложения в IntelliJ IDEA.
+```bash
+mvn -pl notification-service -am spring-boot:run
+```
+
+Для работы почтовых уведомлений также нужен SMTP-сервер. При локальном тестировании можно использовать Mailpit.
+
+Основной способ запуска всего проекта — Docker Compose.

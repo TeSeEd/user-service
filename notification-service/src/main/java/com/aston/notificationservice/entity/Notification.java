@@ -1,3 +1,4 @@
+
 package com.aston.notificationservice.entity;
 
 import com.aston.notificationservice.model.EventType;
@@ -12,6 +13,7 @@ import java.util.UUID;
 @Entity
 @Table(name = "notifications")
 public class Notification {
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -22,12 +24,12 @@ public class Notification {
     @Column(name = "recipient_email", nullable = false, length = 255)
     private String recipientEmail;
 
-    @Column(name = "event_type", nullable = false, length = 30)
     @Enumerated(EnumType.STRING)
+    @Column(name = "event_type", nullable = false, length = 30)
     private EventType eventType;
 
-    @Column(nullable = false, length = 20)
     @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
     private NotificationStatus status;
 
     @Column(name = "attempt_count", nullable = false)
@@ -42,66 +44,153 @@ public class Notification {
     @Column(name = "next_retry_at")
     private OffsetDateTime nextRetryAt;
 
+    @Column(name = "processing_started_at")
+    private OffsetDateTime processingStartedAt;
+
+    @Column(name = "claim_token")
+    private UUID claimToken;
+
     @Column(name = "last_error", columnDefinition = "text")
     private String lastError;
 
     protected Notification() {
-
     }
 
-    public Notification(UUID eventId, String recipientEmail, EventType eventType) {
-        Objects.requireNonNull(eventId, "eventId cannot be null");
-        Objects.requireNonNull(recipientEmail, "recipientEmail cannot be null");
-        Objects.requireNonNull(eventType, "eventType cannot be null");
-        this.eventId = eventId;
+    public Notification(
+            UUID eventId,
+            String recipientEmail,
+            EventType eventType
+    ) {
+        this.eventId = Objects.requireNonNull(eventId);
+        this.eventType = Objects.requireNonNull(eventType);
+
+        if (recipientEmail == null || recipientEmail.isBlank()) {
+            throw new IllegalArgumentException(
+                    "recipientEmail must not be blank"
+            );
+        }
+
         this.recipientEmail = recipientEmail;
-        this.eventType = eventType;
         this.status = NotificationStatus.PENDING;
         this.attemptCount = 0;
     }
 
+    @PrePersist
+    private void onCreate() {
+        if (createdAt == null) {
+            createdAt = OffsetDateTime.now(ZoneOffset.UTC);
+        }
+    }
+
+    public void markProcessing() {
+        if (status != NotificationStatus.PENDING
+                && status != NotificationStatus.FAILED) {
+            throw new IllegalStateException(
+                    "Cannot process notification in status " + status
+            );
+        }
+
+        status = NotificationStatus.PROCESSING;
+        attemptCount++;
+        nextRetryAt = null;
+        processingStartedAt = OffsetDateTime.now(ZoneOffset.UTC);
+        claimToken = UUID.randomUUID();
+    }
+
+    public void markSent() {
+        if (status != NotificationStatus.PROCESSING) {
+            throw new IllegalStateException(
+                    "Notification is not processing"
+            );
+        }
+
+        status = NotificationStatus.SENT;
+        sentAt = OffsetDateTime.now(ZoneOffset.UTC);
+        lastError = null;
+        nextRetryAt = null;
+        processingStartedAt = null;
+        claimToken = null;
+    }
+
+    public void markFailed(String error, OffsetDateTime retryAt) {
+        if (status != NotificationStatus.PROCESSING) {
+            throw new IllegalStateException(
+                    "Notification is not processing"
+            );
+        }
+
+        if (error == null || error.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Error must not be blank"
+            );
+        }
+
+        status = NotificationStatus.FAILED;
+        lastError = error;
+        nextRetryAt = Objects.requireNonNull(retryAt);
+        processingStartedAt = null;
+        claimToken = null;
+    }
+
+    public void recoverStale(OffsetDateTime retryAt) {
+        if (status != NotificationStatus.PROCESSING) {
+            throw new IllegalStateException(
+                    "Notification is not processing"
+            );
+        }
+
+        status = NotificationStatus.FAILED;
+        lastError = "Processing timeout";
+        nextRetryAt = Objects.requireNonNull(retryAt);
+        processingStartedAt = null;
+        claimToken = null;
+    }
+
     public Long getId() {
-        return this.id;
+        return id;
     }
 
     public UUID getEventId() {
-        return this.eventId;
+        return eventId;
     }
 
     public String getRecipientEmail() {
-        return this.recipientEmail;
+        return recipientEmail;
     }
 
     public EventType getEventType() {
-        return this.eventType;
+        return eventType;
     }
 
     public NotificationStatus getStatus() {
-        return this.status;
+        return status;
     }
 
     public Integer getAttemptCount() {
-        return this.attemptCount;
+        return attemptCount;
     }
 
     public OffsetDateTime getCreatedAt() {
-        return this.createdAt;
+        return createdAt;
     }
 
     public OffsetDateTime getSentAt() {
-        return this.sentAt;
+        return sentAt;
     }
 
     public OffsetDateTime getNextRetryAt() {
-        return this.nextRetryAt;
+        return nextRetryAt;
+    }
+
+    public OffsetDateTime getProcessingStartedAt() {
+        return processingStartedAt;
+    }
+
+    public UUID getClaimToken() {
+        return claimToken;
     }
 
     public String getLastError() {
-        return this.lastError;
-    }
-
-    @PrePersist
-    private void onCreate() {
-        this.createdAt = OffsetDateTime.now(ZoneOffset.UTC);
+        return lastError;
     }
 }

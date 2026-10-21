@@ -1,6 +1,10 @@
 package com.aston.userservice.service;
 
+import com.aston.contracts.event.UserEventType;
 import com.aston.userservice.entity.User;
+import com.aston.userservice.outbox.OutboxEvent;
+import com.aston.userservice.outbox.OutboxEventRepository;
+import com.aston.userservice.outbox.OutboxStatus;
 import com.aston.userservice.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -23,8 +27,12 @@ import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class UserServiceTest {
+
     @Mock
     private UserRepository userRepository;
+
+    @Mock
+    private OutboxEventRepository outboxEventRepository;
 
     @InjectMocks
     private UserService userService;
@@ -32,8 +40,10 @@ class UserServiceTest {
     @Test
     void getUserById_shouldReturnUser_whenUserExists() {
         User user = new User("Иван", "example@mail.ru", 25);
+
         when(userRepository.findById(1L))
                 .thenReturn(Optional.of(user));
+
         User result = userService.getUserById(1L);
 
         assertEquals(user, result);
@@ -47,7 +57,9 @@ class UserServiceTest {
 
         assertThrows(
                 NoSuchElementException.class,
-                () -> userService.getUserById(1L));
+                () -> userService.getUserById(1L)
+        );
+
         verify(userRepository).findById(1L);
     }
 
@@ -55,8 +67,10 @@ class UserServiceTest {
     @NullSource
     @ValueSource(longs = {-1, 0})
     void getUserById_shouldThrowException_whenIdIsInvalid(Long id) {
-        assertThrows(IllegalArgumentException.class,
-                () -> userService.getUserById(id));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> userService.getUserById(id)
+        );
 
         verifyNoInteractions(userRepository);
     }
@@ -64,22 +78,43 @@ class UserServiceTest {
     @Test
     void createUser_shouldReturnCreatedUser_whenDataIsValid() {
         User user = new User("Иван", "example@mail.ru", 25);
+        ReflectionTestUtils.setField(user, "id", 1L);
 
         when(userRepository.save(any(User.class)))
                 .thenReturn(user);
 
-        User result = userService.createUser(user.getName(), user.getEmail(), user.getAge());
+        User result = userService.createUser(
+                user.getName(),
+                user.getEmail(),
+                user.getAge()
+        );
 
         assertEquals(user, result);
 
-        ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+        ArgumentCaptor<User> userCaptor =
+                ArgumentCaptor.forClass(User.class);
 
-        verify(userRepository).save(captor.capture());
-        User capturedUser = captor.getValue();
+        verify(userRepository).save(userCaptor.capture());
+
+        User capturedUser = userCaptor.getValue();
 
         assertEquals(user.getName(), capturedUser.getName());
         assertEquals(user.getEmail(), capturedUser.getEmail());
         assertEquals(user.getAge(), capturedUser.getAge());
+
+        ArgumentCaptor<OutboxEvent> eventCaptor =
+                ArgumentCaptor.forClass(OutboxEvent.class);
+
+        verify(outboxEventRepository).save(eventCaptor.capture());
+
+        OutboxEvent capturedEvent = eventCaptor.getValue();
+
+        assertNotNull(capturedEvent.getId());
+        assertEquals(UserEventType.USER_CREATED, capturedEvent.getEventType());
+        assertEquals(1L, capturedEvent.getUserId());
+        assertEquals("example@mail.ru", capturedEvent.getEmail());
+        assertEquals(OutboxStatus.PENDING, capturedEvent.getStatus());
+        assertEquals(0, capturedEvent.getAttemptCount());
     }
 
     @ParameterizedTest
@@ -88,8 +123,10 @@ class UserServiceTest {
     void createUser_shouldThrowException_whenNameIsInvalid(String name) {
         assertThrows(
                 IllegalArgumentException.class,
-                () -> userService.createUser(name, "example@mail.ru", 25));
-        verifyNoInteractions(userRepository);
+                () -> userService.createUser(name, "example@mail.ru", 25)
+        );
+
+        verifyNoInteractions(userRepository, outboxEventRepository);
     }
 
     @ParameterizedTest
@@ -98,8 +135,10 @@ class UserServiceTest {
     void createUser_shouldThrowException_whenEmailIsInvalid(String email) {
         assertThrows(
                 IllegalArgumentException.class,
-                () -> userService.createUser("Иван", email, 25));
-        verifyNoInteractions(userRepository);
+                () -> userService.createUser("Иван", email, 25)
+        );
+
+        verifyNoInteractions(userRepository, outboxEventRepository);
     }
 
     @ParameterizedTest
@@ -108,8 +147,10 @@ class UserServiceTest {
     void createUser_shouldThrowException_whenAgeIsInvalid(Integer age) {
         assertThrows(
                 IllegalArgumentException.class,
-                () -> userService.createUser("Иван", "example@mail.ru", age));
-        verifyNoInteractions(userRepository);
+                () -> userService.createUser("Иван", "example@mail.ru", age)
+        );
+
+        verifyNoInteractions(userRepository, outboxEventRepository);
     }
 
     @Test
@@ -129,8 +170,7 @@ class UserServiceTest {
 
     @Test
     void getAllUsers_shouldReturnEmptyList_whenUsersNotExist() {
-        List<User> users = List.of();
-        when(userRepository.findAll()).thenReturn(users);
+        when(userRepository.findAll()).thenReturn(List.of());
 
         List<User> result = userService.getAllUsers();
 
@@ -142,40 +182,60 @@ class UserServiceTest {
     void updateUser_shouldReturnUpdatedUser_whenUserExists() {
         User existingUser = new User("Иван", "example@mail.ru", 25);
         User newData = new User("Дмитрий", "examplesecond@mail.ru", 30);
+
         ReflectionTestUtils.setField(existingUser, "id", 1L);
 
         when(userRepository.findById(1L))
                 .thenReturn(Optional.of(existingUser));
+
         when(userRepository.save(any(User.class)))
                 .thenReturn(existingUser);
 
-        User result = userService.updateUser(1L, newData.getName(), newData.getEmail(), newData.getAge());
+        User result = userService.updateUser(
+                1L,
+                newData.getName(),
+                newData.getEmail(),
+                newData.getAge()
+        );
 
         assertEquals(existingUser, result);
         verify(userRepository).findById(1L);
 
-        ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+        ArgumentCaptor<User> captor =
+                ArgumentCaptor.forClass(User.class);
+
         verify(userRepository).save(captor.capture());
 
         User capturedUser = captor.getValue();
+
         assertEquals(1L, capturedUser.getId());
         assertEquals(newData.getName(), capturedUser.getName());
         assertEquals(newData.getEmail(), capturedUser.getEmail());
         assertEquals(newData.getAge(), capturedUser.getAge());
+
+        verifyNoInteractions(outboxEventRepository);
     }
 
     @Test
     void updateUser_shouldThrowException_whenUserNotFound() {
         User newData = new User("Дмитрий", "examplesecond@email.ru", 30);
+
         when(userRepository.findById(1L))
                 .thenReturn(Optional.empty());
 
         assertThrows(
                 NoSuchElementException.class,
-                () -> userService.updateUser(1L, newData.getName(), newData.getEmail(), newData.getAge()));
+                () -> userService.updateUser(
+                        1L,
+                        newData.getName(),
+                        newData.getEmail(),
+                        newData.getAge()
+                )
+        );
 
         verify(userRepository).findById(1L);
         verify(userRepository, never()).save(any(User.class));
+        verifyNoInteractions(outboxEventRepository);
     }
 
     @ParameterizedTest
@@ -184,9 +244,15 @@ class UserServiceTest {
     void updateUser_shouldThrowException_whenNameIsInvalid(String name) {
         assertThrows(
                 IllegalArgumentException.class,
-                () -> userService.updateUser(1L, name, "examplesecond@mail.ru", 30));
+                () -> userService.updateUser(
+                        1L,
+                        name,
+                        "examplesecond@mail.ru",
+                        30
+                )
+        );
 
-        verifyNoInteractions(userRepository);
+        verifyNoInteractions(userRepository, outboxEventRepository);
     }
 
     @ParameterizedTest
@@ -195,9 +261,15 @@ class UserServiceTest {
     void updateUser_shouldThrowException_whenEmailIsInvalid(String email) {
         assertThrows(
                 IllegalArgumentException.class,
-                () -> userService.updateUser(1L, "Дмитрий", email, 30));
+                () -> userService.updateUser(
+                        1L,
+                        "Дмитрий",
+                        email,
+                        30
+                )
+        );
 
-        verifyNoInteractions(userRepository);
+        verifyNoInteractions(userRepository, outboxEventRepository);
     }
 
     @ParameterizedTest
@@ -206,9 +278,15 @@ class UserServiceTest {
     void updateUser_shouldThrowException_whenAgeIsInvalid(Integer age) {
         assertThrows(
                 IllegalArgumentException.class,
-                () -> userService.updateUser(1L, "Дмитрий", "examplesecond@mail.ru", age));
+                () -> userService.updateUser(
+                        1L,
+                        "Дмитрий",
+                        "examplesecond@mail.ru",
+                        age
+                )
+        );
 
-        verifyNoInteractions(userRepository);
+        verifyNoInteractions(userRepository, outboxEventRepository);
     }
 
     @ParameterizedTest
@@ -217,14 +295,20 @@ class UserServiceTest {
     void updateUser_shouldThrowException_whenIdIsInvalid(Long id) {
         assertThrows(
                 IllegalArgumentException.class,
-                () -> userService.updateUser(id, "Дмитрий", "examplesecond@mail.ru", 30));
+                () -> userService.updateUser(
+                        id,
+                        "Дмитрий",
+                        "examplesecond@mail.ru",
+                        30
+                )
+        );
 
-        verifyNoInteractions(userRepository);
+        verifyNoInteractions(userRepository, outboxEventRepository);
     }
 
     @Test
     void deleteUser_shouldDeleteUser_whenUserExists() {
-        User existingUser = new User();
+        User existingUser = new User("Иван", "example@mail.ru", 25);
         ReflectionTestUtils.setField(existingUser, "id", 1L);
 
         when(userRepository.findById(1L))
@@ -233,7 +317,22 @@ class UserServiceTest {
         userService.deleteUser(1L);
 
         verify(userRepository).findById(1L);
-        verify(userRepository).deleteById(1L);
+        verify(userRepository).delete(existingUser);
+        verify(userRepository, never()).deleteById(anyLong());
+
+        ArgumentCaptor<OutboxEvent> eventCaptor =
+                ArgumentCaptor.forClass(OutboxEvent.class);
+
+        verify(outboxEventRepository).save(eventCaptor.capture());
+
+        OutboxEvent capturedEvent = eventCaptor.getValue();
+
+        assertNotNull(capturedEvent.getId());
+        assertEquals(UserEventType.USER_DELETED, capturedEvent.getEventType());
+        assertEquals(1L, capturedEvent.getUserId());
+        assertEquals("example@mail.ru", capturedEvent.getEmail());
+        assertEquals(OutboxStatus.PENDING, capturedEvent.getStatus());
+        assertEquals(0, capturedEvent.getAttemptCount());
     }
 
     @Test
@@ -247,7 +346,8 @@ class UserServiceTest {
         );
 
         verify(userRepository).findById(1L);
-        verify(userRepository, never()).deleteById(1L);
+        verify(userRepository, never()).delete(any(User.class));
+        verifyNoInteractions(outboxEventRepository);
     }
 
     @ParameterizedTest
@@ -259,6 +359,6 @@ class UserServiceTest {
                 () -> userService.deleteUser(id)
         );
 
-        verifyNoInteractions(userRepository);
+        verifyNoInteractions(userRepository, outboxEventRepository);
     }
 }

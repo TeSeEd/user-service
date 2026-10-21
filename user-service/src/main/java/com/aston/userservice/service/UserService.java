@@ -1,6 +1,9 @@
 package com.aston.userservice.service;
 
+import com.aston.contracts.event.UserEventType;
 import com.aston.userservice.entity.User;
+import com.aston.userservice.outbox.OutboxEvent;
+import com.aston.userservice.outbox.OutboxEventRepository;
 import com.aston.userservice.repository.UserRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -12,8 +15,12 @@ import java.util.NoSuchElementException;
 public class UserService {
     private final UserRepository userRepository;
 
-    public UserService(UserRepository userRepository) {
+    private final OutboxEventRepository outboxEventRepository;
+
+    public UserService(UserRepository userRepository, OutboxEventRepository outboxEventRepository) {
+
         this.userRepository = userRepository;
+        this.outboxEventRepository = outboxEventRepository;
     }
 
     @Transactional
@@ -29,8 +36,15 @@ public class UserService {
         if (age == null || age <= 0) {
             throw new IllegalArgumentException("Некорректный возраст");
         }
+        User savedUser = userRepository.save(new User(name, email, age));
 
-        return userRepository.save(new User(name, email, age));
+        OutboxEvent event = new OutboxEvent(
+                UserEventType.USER_CREATED,
+                savedUser.getId(),
+                savedUser.getEmail()
+        );
+        outboxEventRepository.save(event);
+        return savedUser;
     }
 
     @Transactional(readOnly = true)
@@ -66,7 +80,14 @@ public class UserService {
 
     @Transactional
     public void deleteUser(Long id) {
-        getUserById(id);
-        userRepository.deleteById(id);
+        User user = getUserById(id);
+        OutboxEvent event = new OutboxEvent(
+                UserEventType.USER_DELETED,
+                user.getId(),
+                user.getEmail()
+        );
+
+        userRepository.delete(user);
+        outboxEventRepository.save(event);
     }
 }
