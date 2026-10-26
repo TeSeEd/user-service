@@ -11,7 +11,9 @@
 ## Возможности
 
 - Создание, получение, обновление и удаление пользователей через REST API.
-- Валидация данных и обработка ошибок.
+- Валидация данных и централизованная обработка ошибок.
+- Документирование REST API с помощью Springdoc OpenAPI и Swagger UI.
+- Поддержка HATEOAS и HAL для навигации по ресурсам пользователей.
 - Отправка событий Kafka при создании и удалении пользователя.
 - Transactional Outbox для надёжной публикации событий.
 - Повторные попытки отправки событий при ошибках.
@@ -28,6 +30,8 @@
 - Spring Boot 3.5.6
 - Spring Web
 - Spring Data JPA, Hibernate
+- Springdoc OpenAPI, Swagger UI
+- Spring HATEOAS
 - PostgreSQL 17
 - Apache Kafka, Spring Kafka
 - Spring Mail
@@ -54,7 +58,7 @@ aston-microservices/
 
 **event-contracts** — общие классы событий для обмена сообщениями между сервисами.
 
-**user-service** — REST API пользователей. При создании и удалении пользователя сохраняет событие в Outbox, после чего публикует его в Kafka.
+**user-service** — REST API пользователей с документацией OpenAPI и поддержкой HATEOAS. При создании и удалении пользователя сохраняет событие в Outbox, после чего публикует его в Kafka.
 
 **notification-service** — обрабатывает события Kafka, сохраняет уведомления в PostgreSQL и отправляет письма.
 
@@ -142,6 +146,8 @@ docker compose logs -f notification-service
 
 - User API: http://localhost:8080/api/users
 - Notification API: http://localhost:8081/api/notifications/email
+- Swagger UI: http://localhost:8080/swagger-ui.html
+- OpenAPI JSON: http://localhost:8080/v3/api-docs
 - Mailpit: http://localhost:8025
 
 Mailpit используется для тестирования отправки писем. Сообщения принимаются локально и не отправляются на реальные почтовые адреса.
@@ -150,13 +156,25 @@ Mailpit используется для тестирования отправк�
 
 Базовый адрес: `http://localhost:8080/api/users`
 
-| Метод | Endpoint | Описание |
-|---|---|---|
-| POST | /api/users | Создание пользователя |
-| GET | /api/users | Список пользователей |
-| GET | /api/users/{id} | Получение по ID |
-| PUT | /api/users/{id} | Обновление пользователя |
-| DELETE | /api/users/{id} | Удаление пользователя |
+| Метод | Endpoint | Описание | Успешный статус |
+|---|---|---|---|
+| POST | /api/users | Создание пользователя | 201 Created |
+| GET | /api/users | Список пользователей | 200 OK |
+| GET | /api/users/{id} | Получение по ID | 200 OK |
+| PUT | /api/users/{id} | Обновление пользователя | 200 OK |
+| DELETE | /api/users/{id} | Удаление пользователя | 204 No Content |
+
+Для некорректных данных предусмотрены ответы `400 Bad Request`, для отсутствующего пользователя — `404 Not Found`.
+
+Ответы с ошибками имеют структуру:
+
+```json
+{
+  "status": 404,
+  "message": "Пользователь с id: 999 не найден",
+  "timestamp": "2026-10-26T12:00:00"
+}
+```
 
 ### Создание пользователя
 
@@ -186,9 +204,131 @@ Invoke-RestMethod `
     -Body $body
 ```
 
+При успешном создании возвращается `201 Created`, заголовок `Location` со ссылкой на созданного пользователя и JSON с его данными и HATEOAS-ссылками.
+
 После создания пользователя формируется событие `USER_CREATED`, которое передаётся через Kafka в notification-service.
 
 При удалении пользователя аналогичным образом формируется событие `USER_DELETED`.
+
+## Swagger и OpenAPI
+
+Для документирования REST API в `user-service` используется **Springdoc OpenAPI**.
+
+Документация автоматически формируется на основе Spring MVC-контроллера, DTO и аннотаций OpenAPI.
+
+Интерактивный интерфейс доступен по адресу:
+
+**http://localhost:8080/swagger-ui.html**
+
+Машиночитаемое описание OpenAPI в JSON:
+
+**http://localhost:8080/v3/api-docs**
+
+Документация содержит:
+
+- Описания всех пяти CRUD-операций.
+- Параметры и тела запросов.
+- HTTP-статусы успешных ответов и ошибок.
+- Схемы `UserRequestDto` и `ErrorResponseDto`.
+- Схемы HATEOAS-ответов отдельного пользователя и коллекции пользователей.
+
+Для описания HATEOAS-формата используются отдельные документационные модели:
+
+- `UserHateoasResponseDoc`
+- `UserCollectionHateoasResponseDoc`
+
+Они используются для генерации документации и не заменяют реальные DTO или объекты Spring HATEOAS.
+
+## HATEOAS и HAL
+
+REST API пользователей поддерживает **HATEOAS (Hypermedia as the Engine of Application State)** с использованием Spring HATEOAS.
+
+Вместе с данными API возвращает ссылки на доступные ресурсы. Клиент может использовать эти ссылки для навигации по API.
+
+Для формирования ответов применяются:
+
+- `EntityModel<UserResponseDto>` — представление отдельного пользователя со ссылками.
+- `CollectionModel<EntityModel<UserResponseDto>>` — представление коллекции пользователей.
+- `WebMvcLinkBuilder` — построение ссылок на методы контроллера.
+
+### Получение пользователя
+
+**GET** `/api/users/1`
+
+Пример ответа:
+
+```json
+{
+  "id": 1,
+  "name": "Ivan",
+  "email": "ivan@example.com",
+  "age": 25,
+  "createdAt": "2026-10-26T12:00:00",
+  "_links": {
+    "self": {
+      "href": "http://localhost:8080/api/users/1"
+    },
+    "users": {
+      "href": "http://localhost:8080/api/users"
+    }
+  }
+}
+```
+
+Ссылка `self` указывает на текущего пользователя.
+
+Ссылка `users` позволяет перейти к коллекции всех пользователей.
+
+### Получение списка пользователей
+
+**GET** `/api/users`
+
+Пример ответа:
+
+```json
+{
+  "_embedded": {
+    "userResponseDtoList": [
+      {
+        "id": 1,
+        "name": "Ivan",
+        "email": "ivan@example.com",
+        "age": 25,
+        "createdAt": "2026-10-26T12:00:00",
+        "_links": {
+          "self": {
+            "href": "http://localhost:8080/api/users/1"
+          },
+          "users": {
+            "href": "http://localhost:8080/api/users"
+          }
+        }
+      }
+    ]
+  },
+  "_links": {
+    "self": {
+      "href": "http://localhost:8080/api/users"
+    }
+  }
+}
+```
+
+Поле `_embedded` содержит пользователей, каждый из которых имеет собственные HATEOAS-ссылки.
+
+Поле `_links` на верхнем уровне описывает ссылки самой коллекции.
+
+Если пользователей нет, коллекция возвращается с HTTP `200 OK` и ссылкой `self`; блок `_embedded` может отсутствовать.
+
+**Важно:** после внедрения HATEOAS метод `GET /api/users` возвращает HAL-объект, а не корневой JSON-массив.
+
+### HATEOAS в остальных операциях
+
+- `POST /api/users` — `201 Created`, данные созданного пользователя со ссылками `self` и `users`.
+- `PUT /api/users/{id}` — `200 OK`, обновлённый пользователь со ссылками `self` и `users`.
+- `DELETE /api/users/{id}` — `204 No Content`, без тела ответа.
+
+Бизнес-логика сервисного слоя при внедрении HATEOAS не изменялась.
 
 ## REST API уведомлений
 
@@ -222,7 +362,7 @@ Invoke-RestMethod `
     -Body $body
 ```
 
-При успешной отправке возвращается HTTP `202 Accepted`.
+При успешном принятии запроса возвращается HTTP `202 Accepted`.
 
 Письмо можно проверить в Mailpit:
 
@@ -275,22 +415,55 @@ SELECT * FROM notifications;
 Проверяются:
 
 - Бизнес-логика работы с пользователями.
-- REST API.
+- REST API и валидация данных.
+- HTTP-статусы и обработка ошибок.
+- HATEOAS-ссылки в ответах API.
+- HAL-коллекции, включая пустой список пользователей.
 - Работа с PostgreSQL.
-- Сохранение событий в Outbox.
-- Публикация сообщений Kafka.
+- Сохранение событий в Transactional Outbox.
+- Публикация Kafka-событий.
+- Обработка событий и защита от дубликатов.
+- Транзакционность сохранения обработанных событий.
 - Работа репозитория уведомлений.
 - Отправка электронных писем.
 
+### Тестирование HATEOAS
+
+В `UserControllerTest` используются MockMvc и Mockito.
+
+Тесты проверяют:
+
+- `POST /api/users` — статус `201`, заголовок `Location`, поля пользователя, ссылки `self` и `users`.
+- `GET /api/users/{id}` — данные пользователя и ссылки `self` и `users`.
+- `GET /api/users` — структуру `_embedded.userResponseDtoList`, данные пользователей и HATEOAS-ссылки.
+- Пустой список — HTTP `200`, отсутствие `_embedded` и наличие ссылки коллекции `self`.
+- `PUT /api/users/{id}` — обновлённые данные и HATEOAS-ссылки.
+- `DELETE /api/users/{id}` — статус `204` и пустое тело.
+- Обработку некорректных запросов и отсутствующих пользователей.
+
+Для запуска тестов контроллера из корня проекта:
+
+```powershell
+mvn -pl user-service -am "-Dtest=UserControllerTest" "-Dsurefire.failIfNoSpecifiedTests=false" test
+```
+
+### Интеграционные тесты SMTP
+
 Для интеграционных тестов почты используется **GreenMail** — тестовый SMTP-сервер.
 
-Добавлены три сценария:
+Проверяются три сценария:
 
 1. Отправка приветственного письма при `USER_CREATED`.
 2. Отправка письма при `USER_DELETED`.
 3. Отправка произвольного письма через REST API.
 
 Тесты проверяют получателя, тему и содержимое сообщения.
+
+Отдельный запуск в Windows PowerShell:
+
+```powershell
+mvn -pl notification-service -am "-Dtest=EmailIntegrationTest" "-Dsurefire.failIfNoSpecifiedTests=false" test
+```
 
 ### Запуск всех тестов
 
@@ -300,28 +473,27 @@ SELECT * FROM notifications;
 mvn clean test
 ```
 
-Для тестов с Testcontainers необходим работающий Docker.
+Для интеграционных тестов с Testcontainers необходим работающий Docker.
 
-На последнем полностью успешном запуске прошли **97 тестов**:
+**Последний подтверждённый успешный прогон: 26 октября 2026 года.**
 
-| Модуль | Количество |
-|---|---:|
-| event-contracts | 5 |
-| user-service | 86 |
-| notification-service | 6 |
-| **Всего** | **97** |
-
-Дополнительно добавлены три интеграционных теста SMTP. На первом запуске два теста прошли, а третий обнаружил несовпадение ожидаемой темы письма. После исправления требуется повторный запуск тестов.
-
-### Отдельный запуск тестов SMTP
-
-В Windows PowerShell:
-
-```powershell
-mvn -pl notification-service -am "-Dtest=EmailIntegrationTest" "-Dsurefire.failIfNoSpecifiedTests=false" test
+```text
+[INFO] Reactor Summary:
+[INFO]
+[INFO] event-contracts 1.0.0 ............... SUCCESS
+[INFO] user-service 1.0-SNAPSHOT ........... SUCCESS
+[INFO] notification-service 0.0.1-SNAPSHOT . SUCCESS
+[INFO] aston-microservices 1.0.0 ........... SUCCESS
+[INFO]
+[INFO] BUILD SUCCESS
+[INFO] Total time: 01:13 min
 ```
 
-Кроме автоматических тестов, вручную проверены создание и удаление пользователей, публикация Kafka-событий, сохранение уведомлений и отправка писем через Mailpit.
+Все модули успешно прошли полный цикл `mvn clean test`.
+
+Кроме автоматических тестов, вручную проверены REST API, создание и удаление пользователей, Kafka-события, сохранение уведомлений и отправка писем через Mailpit.
+
+Также проверены Swagger UI, OpenAPI JSON и реальные HAL-ответы API пользователей.
 
 ## Остановка проекта
 

@@ -57,7 +57,9 @@ public class UserControllerTest {
                 .andExpect(jsonPath("$.id").value(1))
                 .andExpect(jsonPath("$.name").value("Иван"))
                 .andExpect(jsonPath("$.email").value("example@email.com"))
-                .andExpect(jsonPath("$.age").value(25));
+                .andExpect(jsonPath("$.age").value(25))
+                .andExpect(jsonPath("$._links.self.href").value("http://localhost/api/users/1"))
+                .andExpect(jsonPath("$._links.users.href").value("http://localhost/api/users"));
 
         verify(userService).createUser(user.getName(), user.getEmail(), user.getAge());
     }
@@ -97,7 +99,9 @@ public class UserControllerTest {
                 .andExpect(jsonPath("$.id").value(1))
                 .andExpect(jsonPath("$.name").value("Иван"))
                 .andExpect(jsonPath("$.email").value("example@email.com"))
-                .andExpect(jsonPath("$.age").value(25));
+                .andExpect(jsonPath("$.age").value(25))
+                .andExpect(jsonPath("$._links.self.href").value("http://localhost/api/users/1"))
+                .andExpect(jsonPath("$._links.users.href").value("http://localhost/api/users"));
 
         verify(userService).getUserById(1L);
     }
@@ -125,19 +129,22 @@ public class UserControllerTest {
         ReflectionTestUtils.setField(users.get(1), "id", 2L);
 
         when(userService.getAllUsers()).thenReturn(users);
-
+        String directory = "$._embedded.userResponseDtoList";
         mockMvc.perform(get("/api/users"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$").isArray())
-                .andExpect(jsonPath("$").value(hasSize(2)))
-                .andExpect(jsonPath("$[0].id").value(1))
-                .andExpect(jsonPath("$[0].name").value("Иван"))
-                .andExpect(jsonPath("$[0].email").value("example@email.com"))
-                .andExpect(jsonPath("$[0].age").value(25))
-                .andExpect(jsonPath("$[1].id").value(2))
-                .andExpect(jsonPath("$[1].name").value("Дмитрий"))
-                .andExpect(jsonPath("$[1].email").value("examplesecond@email.com"))
-                .andExpect(jsonPath("$[1].age").value(30));
+                .andExpect(jsonPath(directory).isArray())
+                .andExpect(jsonPath(directory).value(hasSize(2)))
+                .andExpect(jsonPath(directory + "[0].id").value(1))
+                .andExpect(jsonPath(directory + "[0].name").value("Иван"))
+                .andExpect(jsonPath(directory + "[0].email").value("example@email.com"))
+                .andExpect(jsonPath(directory + "[0].age").value(25))
+                .andExpect(jsonPath(directory + "[0]._links.self.href").value("http://localhost/api/users/1"))
+                .andExpect(jsonPath(directory + "[1].id").value(2))
+                .andExpect(jsonPath(directory + "[1].name").value("Дмитрий"))
+                .andExpect(jsonPath(directory + "[1].email").value("examplesecond@email.com"))
+                .andExpect(jsonPath(directory + "[1].age").value(30))
+                .andExpect(jsonPath(directory + "[1]._links.self.href").value("http://localhost/api/users/2"))
+                .andExpect(jsonPath("$._links.self.href").value("http://localhost/api/users"));
 
         verify(userService).getAllUsers();
     }
@@ -148,8 +155,9 @@ public class UserControllerTest {
 
         mockMvc.perform(get("/api/users"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$").isArray())
-                .andExpect(jsonPath("$").value(hasSize(0)));
+                .andExpect(jsonPath("$").isMap())
+                .andExpect(jsonPath("$._embedded").doesNotExist())
+                .andExpect(jsonPath("$._links.self.href").value("http://localhost/api/users"));
 
         verify(userService).getAllUsers();
     }
@@ -180,7 +188,9 @@ public class UserControllerTest {
                 .andExpect(jsonPath("$.id").value(1))
                 .andExpect(jsonPath("$.name").value(updatedUser.getName()))
                 .andExpect(jsonPath("$.email").value(updatedUser.getEmail()))
-                .andExpect(jsonPath("$.age").value(updatedUser.getAge()));
+                .andExpect(jsonPath("$.age").value(updatedUser.getAge()))
+                .andExpect(jsonPath("$._links.self.href").value("http://localhost/api/users/1"))
+                .andExpect(jsonPath("$._links.users.href").value("http://localhost/api/users"));
 
         verify(userService).updateUser(1L, updatedUser.getName(), updatedUser.getEmail(), updatedUser.getAge());
     }
